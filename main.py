@@ -33,17 +33,20 @@ def listen_for_commands():
         print("Listening for commands... Say 'bye' to exit.")
 
         while True:
-            recognizer.adjust_for_ambient_noise(source, duration=0.5)
-            audio = recognizer.listen(source)
+            recognizer.adjust_for_ambient_noise(source, duration=1)  # Adjust for better recognition
+            print("Start speaking...")
+
+            audio = recognizer.listen(source, timeout=None, phrase_time_limit=10)
 
             try:
-                command = recognizer.recognize_google(audio).lower()
+                command = recognizer.recognize_google(audio).lower().strip()
                 print(f"You said: {command}")
 
-                if command in ["bye", "bye bye", "okay bye", "ok thanks"]:
+                exit_phrases = ["bye", "bye bye", "okay bye", "ok thanks", "goodbye", "see you"]
+                if any(phrase in command for phrase in exit_phrases):  # Check if any exit phrase is in command
                     print("Goodbye! Stopping assistant.")
                     speak_response("Goodbye!")
-                    break  # Exit the loop
+                    exit(0)  # Forcefully stop execution
 
                 ai_response = get_mistral_response(command)
                 print(f"AI: {ai_response}")
@@ -53,6 +56,8 @@ def listen_for_commands():
                 print("Didn't catch that. Say it again.")
             except sr.RequestError:
                 print("Could not request results. Check your internet connection.")
+
+
 
 def get_mistral_response(user_input):
     """Gets AI-generated response from Mistral."""
