@@ -1,50 +1,61 @@
-import speech_recognition as sr
+import pvporcupine
+import pyaudio
+import struct
 import ollama
 import pyttsx3
+import speech_recognition as sr
 
-# Initialize Text-to-Speech
+# 🔹 Initialize Text-to-Speech
 engine = pyttsx3.init()
 
-def recognize_speech():
+# 🔹 Load Porcupine wake word detector
+porcupine = pvporcupine.create(
+    access_key="4MwfdyeJf8ipi3rHAxin8hNblKy4KeLyodxE0FwnmyO+Qsso8mNiiA==",  # Replace with your Picovoice API key
+    keyword_paths=["hey_mistral.ppn"]  # Ensure this file is in the project folder
+)
+
+# 🔹 Audio setup
+pa = pyaudio.PyAudio()
+audio_stream = pa.open(
+    rate=porcupine.sample_rate,
+    channels=1,
+    format=pyaudio.paInt16,
+    input=True,
+    frames_per_buffer=porcupine.frame_length
+)
+
+def listen_for_commands():
+    """Listens for commands continuously until user says 'bye' or similar exit phrases."""
     recognizer = sr.Recognizer()
     mic_index = 1  # Your default mic
 
     with sr.Microphone(device_index=mic_index) as source:
-        print("Listening for 'Hey Mistral'...")
+        print("Listening for commands... Say 'bye' to exit.")
 
-        while True:  # Keep listening without timeout
-            recognizer.adjust_for_ambient_noise(source, duration=0.5)  # Adjust for noise
+        while True:
+            recognizer.adjust_for_ambient_noise(source, duration=0.5)
             audio = recognizer.listen(source)
 
             try:
-                text = recognizer.recognize_google(audio).lower()
-                print(f"You said: {text}")
+                command = recognizer.recognize_google(audio).lower()
+                print(f"You said: {command}")
 
-                if "hey mistral" in text:
-                    print("Wake word detected! Listening for command...")
-                    return listen_for_command(recognizer, source)  # Listen for next phrase
+                if command in ["bye", "bye bye", "okay bye", "ok thanks"]:
+                    print("Goodbye! Stopping assistant.")
+                    speak_response("Goodbye!")
+                    break  # Exit the loop
+
+                ai_response = get_mistral_response(command)
+                print(f"AI: {ai_response}")
+                speak_response(ai_response)
 
             except sr.UnknownValueError:
-                continue  # Ignore unrecognized sounds
+                print("Didn't catch that. Say it again.")
             except sr.RequestError:
-                print("Error: Could not access speech recognition service.")
-                return None
-
-def listen_for_command(recognizer, source):
-    """Listens for a command after 'Hey Mistral' is detected."""
-    print("Listening for your command...")
-    recognizer.adjust_for_ambient_noise(source, duration=0.5)
-    audio = recognizer.listen(source)
-
-    try:
-        command = recognizer.recognize_google(audio)
-        print(f"Command: {command}")
-        return command
-    except sr.UnknownValueError:
-        print("Didn't catch that. Say it again.")
-        return None
+                print("Could not request results. Check your internet connection.")
 
 def get_mistral_response(user_input):
+    """Gets AI-generated response from Mistral."""
     try:
         response = ollama.chat(model="mistral", messages=[{"role": "user", "content": user_input}])
         return response['message']['content']
@@ -53,13 +64,23 @@ def get_mistral_response(user_input):
         return "Sorry, I encountered an error."
 
 def speak_response(response_text):
+    """Speaks out the AI-generated response."""
     engine.say(response_text)
     engine.runAndWait()
 
-if __name__ == "__main__":
+def detect_wake_word():
+    """Listens for 'Hey Mistral' using Porcupine and keeps listening for follow-ups."""
+    print("Listening for 'Hey Mistral'...")
+
     while True:
-        user_input = recognize_speech()  # Waits until "Hey Mistral" is detected
-        if user_input:
-            ai_response = get_mistral_response(user_input)
-            print(f"AI: {ai_response}")
-            speak_response(ai_response)
+        pcm = audio_stream.read(porcupine.frame_length)
+        pcm_unpacked = struct.unpack_from("h" * porcupine.frame_length, pcm)
+
+        keyword_index = porcupine.process(pcm_unpacked)
+        if keyword_index >= 0:
+            print("Wake word detected! Now listening for commands...")
+            speak_response("Yes? I'm listening.")
+            listen_for_commands()  # Now continuously listens until exit command
+
+if __name__ == "__main__":
+    detect_wake_word()  # Start wake-word detection
